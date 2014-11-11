@@ -111,25 +111,26 @@ public class Company
 
 //// READ
 
+// AS a user
+// WHEN I enter ads page
+// I WANT to see ads from companies that I am a customer of
+// SO THAT I can choose to buy more stuff
+// AND I ALSO WANT these ads to be current
+// SO THAT I don't waste my time on reading archived ads
+// AH AH AND I ALSO WANT to see their views count
+// SO THAT I know if this might be trendy soon
+// OH AND OH AND OH AND OH AND OH AND......
+// (...)
+
 public partial class AdsController : Controller
 {
-    // AS a user
-    // WHEN I enter ads page
-    // I WANT to see ads from companies that I am a customer of
-    // SO THAT I can choose to buy more stuff
-    // AND I ALSO WANT these ads to be current
-    // SO THAT I don't waste my time on reading archived ads
-    // AH AH AND I ALSO WANT to see their views count
-    // SO THAT I know if this might be trendy soon
-    // OH AND OH AND OH AND OH AND OH AND......
-    // (...)
     public ActionResult GetAds(IPrincipal currentUser)
     {
         int userId = currentUser.Id();
 
         var repository = new AdsRepository();
         IEnumerable<Advertisement> ads = repository
-            .Get_NonArchived_News_WithViewsCount_WithoutPictures_ForUser(userId);
+            .Get_NonArchived_Ads_WithViewsCount_WithoutPictures_ForUser(userId);
 
         return View(ads);
     }
@@ -137,9 +138,9 @@ public partial class AdsController : Controller
 
 public class AdsRepository
 {
-    public IEnumerable<Advertisement> Get_NonArchived_News_WithViewsCount_WithoutPictures_ForUser(int userId)
+    public IEnumerable<Advertisement> Get_NonArchived_Ads_WithViewsCount_WithoutPictures_ForUser(int userId)
     {
-        //  select n.Id, n.Title, n.Content
+        //  select a.Id, a.Title, a.Content
         //      , (select count(*) from AdViews v where v.ParentAdId = a.Id)
         //  from Advertisements a
         //      join Companies c on a.CompanyId = c.Id
@@ -179,7 +180,7 @@ public class AdsRepository
 /*
 
 CREATE VIEW advertisements_for_ads_page AS
-    select u.Id, n.Id, n.Title, n.Content
+    select u.Id as UserId, a.Id, a.Title, a.Content
         , (select count(*) from AdViews v where v.ParentAdId = a.Id)
     from Advertisements a
         join Companies c on a.CompanyId = c.Id
@@ -202,8 +203,9 @@ public partial class AdsController
     {
         int userId = currentUser.Id();
 
-        var ads = _simpleData.advertisements_for_ads_page
-            .FindAllByUserId(userId);
+        IEnumerable<dynamic> ads = _simpleData
+            .advertisements_for_ads_page
+                .FindAllByUserId(userId);
 
         return View(ads);
     }
@@ -216,9 +218,16 @@ public partial class AdsController
 
 //// WRITE
 
+// AS a user
+// WHEN I read an ad
+// I WANT to mark it as "interesting"
+// SO THAT I can easily find it again later
+// AND see more ads similar to this one
+// (...)
+
 public partial class AdsController
 {
-    public ActionResult MarkAsSeen(IPrincipal currentUser, int adId)
+    public ActionResult MarkAsInteresting(IPrincipal currentUser, int adId)
     {
         using (ISession session = SessionFactory.OpenSession())
         {
@@ -226,14 +235,14 @@ public partial class AdsController
             {
                 var user = session.Get<User>(currentUser.Id());
                 var ad = session.Get<Advertisement>(adId);
-                user.SeenAds.Add(ad);
+                user.InterestingAds.Add(ad);
                 session.Save(user);
 
                 tx.Commit();
             }
         }
 
-        // or use "Ads Service"
+        // or use "Ads Service"...
 
         return OK();
     }
@@ -243,14 +252,14 @@ public partial class AdsController
 
 public partial class User
 {
-    public List<Advertisement> SeenAds { get; set; }
+    public List<Advertisement> InterestingAds { get; set; }
 }
 
-// !!! JUST a reminder...
 // ...recall READ side before modifications...
-// ...we would need to generate this:
-//      and not exists
-//      (select 1 from SeenAds sa where sa.UserId = ... AND sa.AdvertisementId = ...)
+// ...we would now need to generate this:
+//    select 1 from InterestingAds ia
+//    where ia.UserId = ... and ia.AdvertisementId = ....
+//          as IsMarkedAsInteresting
 // using ORM - DIFFICULT,
 // now we only add it in view - SIMPLE
 
@@ -290,8 +299,11 @@ public class CommandBus : ICommandBus
     public void SendCommand<T>(T cmd) where T : ICommand
     {
         // log
+        // authz
+        // tx
         // validate
         // measure time
+        // error handling
         // ...
 
         var handler = (IHandleCommand<T>)_handlersFactory(typeof(T));
@@ -299,7 +311,7 @@ public class CommandBus : ICommandBus
     }
 }
 
-public class MarkAdAsSeenCommand : ICommand
+public class MarkAdAsInterestingCommand : ICommand
 {
     public int UserId { get; set; }
     public int AdId { get; set; }
@@ -314,7 +326,7 @@ public partial class AdsController
         _commandBus = commandBus;
     }
 
-    public ActionResult MarkAsSeen_UsingCommands(MarkAdAsSeenCommand command)
+    public ActionResult MarkAsInteresting_UsingCommands(MarkAdAsInterestingCommand command)
     {
         _commandBus.SendCommand(command);
         return OK();
@@ -323,24 +335,23 @@ public partial class AdsController
 
 // every command handler is crafted for the job,
 // so this might be OK instead of "full blown domain model"
-public class MarkAdAsSeenHandler : IHandleCommand<MarkAdAsSeenCommand>
+public class MarkAdAsInterestingHandler : IHandleCommand<MarkAdAsInterestingCommand>
 {
     private readonly dynamic _simpleData;
 
-    public MarkAdAsSeenHandler(dynamic simpleData)
+    public MarkAdAsInterestingHandler(dynamic simpleData)
     {
         _simpleData = simpleData;
     }
 
-    // binding takes care of validation
-    public void Handle(MarkAdAsSeenCommand command)
+    public void Handle(MarkAdAsInterestingCommand command)
     {
-        _simpleData.SeenAds.Insert(
+        _simpleData.InterestingAds.Insert(
             UserId: command.UserId, AdvertisementId: command.AdId
         );
 
         // enter EVENTS
-        _eventsBus.PublishEvent(new AdMarkedAsSeen
+        _eventsBus.PublishEvent(new AdMarkedAsInteresting
         {
             UserId = command.UserId,
             AdId = command.AdId,
@@ -394,25 +405,25 @@ public class EventsBus : IEventsBus
     }
 }
 
-public class AdMarkedAsSeen : IEvent
+public class AdMarkedAsInteresting : IEvent
 {
     public int UserId { get; set; }
     public int AdId { get; set; }
 }
 
-public class WhenAdMarkedAsSeen_NotifyCompany : IHandleEvent<AdMarkedAsSeen>
+public class WhenAdMarkedAsInteresting_NotifyCompany : IHandleEvent<AdMarkedAsInteresting>
 {
-    public void Handle(AdMarkedAsSeen @event)     {    }
+    public void Handle(AdMarkedAsInteresting @event)     {    }
 }
 
-public class WhenAdMarkedAsSeen_TargetMoreAdsTowardsUser : IHandleEvent<AdMarkedAsSeen>
+public class WhenAdMarkedAsInteresting_TargetMoreAdsTowardsUser : IHandleEvent<AdMarkedAsInteresting>
 {
-    public void Handle(AdMarkedAsSeen @event)    {    }
+    public void Handle(AdMarkedAsInteresting @event)    {    }
 }
 
-public class WhenAdMarkedAsSeen_PrepareEmailCampaignForUser : IHandleEvent<AdMarkedAsSeen>
+public class WhenAdMarkedAsInteresting_PrepareEmailCampaignForUser : IHandleEvent<AdMarkedAsInteresting>
 {
-    public void Handle(AdMarkedAsSeen @event)    {    }
+    public void Handle(AdMarkedAsInteresting @event)    {    }
 }
 
 
@@ -421,7 +432,7 @@ public class WhenAdMarkedAsSeen_PrepareEmailCampaignForUser : IHandleEvent<AdMar
 
 
 
-// hardcore "catch all commands controller" implementation:
+// single controller for all write-operations
 public class CommandsController : Controller
 {
     private readonly ICommandBus _commandBus;
@@ -449,7 +460,9 @@ public class EventSourcingEventHandler : IHandleEvent<IEvent>
 }
 
 // distribute commands and events via message bus
-public class MessageBusIntegration : IHandleCommand<ICommand>, IHandleEvent<IEvent>
+public class MessageBusIntegration :
+    IHandleCommand<ICommand>
+    , IHandleEvent<IEvent>
 {
     private readonly IBus _bus;
 
